@@ -18,6 +18,7 @@
 
 #include <folly/File.h>
 #include <folly/io/IOBuf.h>
+#include <cstdint>
 
 #include "cachelib/common/AtomicCounter.h"
 #include "cachelib/common/PercentileStats.h"
@@ -166,16 +167,23 @@ class Device {
   virtual bool readImpl(uint64_t offset, uint32_t size, void* value) = 0;
   virtual void flushImpl() = 0;
 
- private:
   mutable AtomicCounter bytesWritten_;
+  mutable util::PercentileStats writeLatencyEstimator_;
+ 
+  // When write-io is issued, it is broken down into writeImpl calls at
+  // this granularity. maxWriteSize_ 0 means no maximum write size.
+  // maxWriteSize_ option allows splitting the large writes to smaller
+  // writes so that the device read latency is not adversely impacted by
+  // large device writes
+  const uint32_t maxWriteSize_{0};
+ private:
   mutable AtomicCounter bytesRead_;
   mutable AtomicCounter writeIOErrors_;
   mutable AtomicCounter readIOErrors_;
   mutable AtomicCounter encryptionErrors_;
   mutable AtomicCounter decryptionErrors_;
-
   mutable util::PercentileStats readLatencyEstimator_;
-  mutable util::PercentileStats writeLatencyEstimator_;
+  
 
   bool readInternal(uint64_t offset, uint32_t size, void* value);
 
@@ -195,12 +203,7 @@ class Device {
   // Number of zones
   const uint64_t ioNoOfZones_{0};
 
-  // When write-io is issued, it is broken down into writeImpl calls at
-  // this granularity. maxWriteSize_ 0 means no maximum write size.
-  // maxWriteSize_ option allows splitting the large writes to smaller
-  // writes so that the device read latency is not adversely impacted by
-  // large device writes
-  const uint32_t maxWriteSize_{0};
+  
 
   std::shared_ptr<DeviceEncryptor> encryptor_;
 
@@ -231,6 +234,7 @@ std::unique_ptr<Device> createMemoryDevice(
 std::unique_ptr<Device> createDirectIoZNSDevice(
     std::string fileName,
     uint64_t size,
+    uint32_t nr_zones,
     uint32_t ioAlignSize,
     std::shared_ptr<DeviceEncryptor> encryptor,
     uint32_t maxDeviceWriteSize);

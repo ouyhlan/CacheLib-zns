@@ -19,6 +19,7 @@
 #include <folly/dynamic.h>
 #include <folly/logging/xlog.h>
 
+#include <cstdint>
 #include <stdexcept>
 
 #include "cachelib/allocator/nvmcache/BlockCacheReinsertionPolicy.h"
@@ -399,6 +400,79 @@ class BigHashConfig {
 };
 
 /**
+ * ZoneHashConfig provides APIs for users to configure ZoneHashConfig engine,
+ * which is one part of NavyConfig.
+ *
+ * By this class, users can:
+ * - enable ZoneHashConfig by setting sizePct > 0
+ * - set maximum item size
+ * - set bucket size
+ * - set bloom filter size (0 to disable bloom filter)
+ * - set log percent and number of partitions
+ * - get the values of all the above parameters
+ */
+class ZoneHashConfig {
+ public:
+  ZoneHashConfig& setPageSize(uint32_t page_size_byte) noexcept {
+    page_size_byte_ = page_size_byte;
+    return *this;
+  }
+
+  ZoneHashConfig& setMaxItemSize(uint64_t small_item_max_size) {
+    enable_ = true;
+    small_item_max_size_ = small_item_max_size;
+    return *this;
+  }
+
+  ZoneHashConfig& setAdaptive(uint32_t adaptive_pct) {
+    adaptive_pct_ = adaptive_pct;
+    return *this;
+  }
+
+  ZoneHashConfig& setLog(uint32_t log_num_zones,
+                         uint64_t physical_partitions,
+                         uint64_t index_per_physical_partitions,
+                         uint32_t threshold);
+
+  ZoneHashConfig& setGarbageCollection(uint32_t num_clean_zones) {
+    num_clean_zones_ = num_clean_zones;
+    return *this;
+  }
+
+  bool enable() const { return enable_; }
+
+  uint64_t getSmallItemMaxSize() const { return small_item_max_size_; }
+
+  uint32_t getPageSize() const { return page_size_byte_; }
+
+  uint32_t getLogNumZones() const { return log_num_zones_; }
+
+  uint64_t getLogFlashPartitions() const { return log_flash_partitions_; }
+
+  uint64_t getLogIndexPartitions() const {
+    return log_index_per_flash_partitions_;
+  }
+
+  uint32_t getNumCleanZones() const { return num_clean_zones_; }
+
+  uint32_t getSetAdmitThreshold() const { return set_admit_threshold_; }
+
+  uint32_t getAdaptivePct() const { return adaptive_pct_; }
+
+ private:
+  bool enable_{false};
+  uint32_t page_size_byte_{4096};
+  uint64_t small_item_max_size_{};
+  uint32_t log_num_zones_{6};
+  uint64_t log_flash_partitions_{1};
+  uint64_t log_index_per_flash_partitions_{1};
+  uint32_t num_clean_zones_{2};
+  uint32_t set_admit_threshold_{1};
+
+  uint32_t adaptive_pct_{0};
+};
+
+/**
  * NavyConfig provides APIs for users to set up Navy related settings for
  * NvmCache.
  *
@@ -419,6 +493,7 @@ class NavyConfig {
   bool usesRaidFiles() const noexcept { return raidPaths_.size() > 0; }
   bool usesZonedDevice() const noexcept { return zonedDevice_; }
   bool isBigHashEnabled() const { return bigHashConfig_.getSizePct() > 0; }
+  bool isZoneHashEnabled() const { return zoneHashConfig_.enable() > 0; }
   std::map<std::string, std::string> serialize() const;
 
   // Getters:
@@ -439,6 +514,7 @@ class NavyConfig {
   const std::vector<std::string>& getRaidPaths() const;
   uint64_t getDeviceMetadataSize() const { return deviceMetadataSize_; }
   bool getZonedDevice() const { return zonedDevice_; }
+  uint32_t getZoneNum() const { return numZones_; }
   uint64_t getFileSize() const { return fileSize_; }
   bool getTruncateFile() const { return truncateFile_; }
   uint32_t getDeviceMaxWriteSize() const { return deviceMaxWriteSize_; }
@@ -450,10 +526,13 @@ class NavyConfig {
   // Returns the threshold of classifying an item as small item or large item
   // for Navy engine.
   uint64_t getSmallItemThreshold() const {
-    if (!isBigHashEnabled()) {
-      return 0;
+    if (isBigHashEnabled()) {
+      return bigHashConfig_.getSmallItemMaxSize();
+    } else if (isZoneHashEnabled()) {
+      return zoneHashConfig_.getSmallItemMaxSize();
     }
-    return bigHashConfig_.getSmallItemMaxSize();
+
+    return 0;
   }
 
   // Return a const BlockCacheConfig to read values of its parameters.
@@ -462,9 +541,14 @@ class NavyConfig {
   // Return a const BlockCacheConfig to read values of its parameters.
   const BlockCacheConfig& blockCache() const { return blockCacheConfig_; }
 
+  const ZoneHashConfig& zoneHash() const { return zoneHashConfig_; }
+
   // ============ Job scheduler settings =============
   unsigned int getReaderThreads() const { return readerThreads_; }
   unsigned int getWriterThreads() const { return writerThreads_; }
+  unsigned int getGarbageCollecterThreads() const {
+    return garbageCollecterThreads_;
+  }
   uint64_t getNavyReqOrderingShards() const { return navyReqOrderingShards_; }
 
   // ============ other settings =============
@@ -495,8 +579,9 @@ class NavyConfig {
   void setRaidFiles(std::vector<std::string> raidPaths,
                     uint64_t fileSize,
                     bool truncateFile = false);
-  void setZonedDevice(int zonedDevice) noexcept {
-	   zonedDevice_  = (uint32_t)zonedDevice;
+  void setZonedDevice(int zonedDevice, uint32_t nr_zones) noexcept {
+    zonedDevice_ = (uint32_t)zonedDevice;
+    numZones_ = nr_zones;
   }
   // Set the parameter for a in-memory file.
   // This function is only for cachebench and unit tests to create
@@ -517,12 +602,21 @@ class NavyConfig {
   // Return BigHashConfig for configuration.
   BigHashConfig& bigHash() noexcept { return bigHashConfig_; }
 
+  // ============ ZoneHash settings =============
+  ZoneHashConfig& zoneHash() noexcept { return zoneHashConfig_; }
+
   // ============ Job scheduler settings =============
   void setReaderAndWriterThreads(unsigned int readerThreads,
                                  unsigned int writerThreads) noexcept {
     readerThreads_ = readerThreads;
     writerThreads_ = writerThreads;
   }
+
+  void setGarbageCollecterThreads(
+      unsigned int garbagecollecterThreads) noexcept {
+    garbageCollecterThreads_ = garbagecollecterThreads;
+  }
+
   // Set Navy request ordering shards (expressed as power of two).
   // @throw std::invalid_argument if the input value is 0.
   void setNavyReqOrderingShards(uint64_t navyReqOrderingShards);
@@ -556,6 +650,7 @@ class NavyConfig {
   // 0 means to use the whole device.
   uint64_t fileSize_{};
   bool zonedDevice_{false};
+  uint32_t numZones_{0};
   // Whether ask Navy to truncate the file it uses.
   bool truncateFile_{false};
   // This controls granularity of the writes when we flush the region.
@@ -568,11 +663,16 @@ class NavyConfig {
   // ============ BigHash settings =============
   BigHashConfig bigHashConfig_{};
 
+  // ============ ZoneHash settings =============
+  ZoneHashConfig zoneHashConfig_{};
+
   // ============ Job scheduler settings =============
   // Number of asynchronous worker thread for read operation.
   unsigned int readerThreads_{32};
   // Number of asynchronous worker thread for write operation.
   unsigned int writerThreads_{32};
+
+  unsigned int garbageCollecterThreads_{0};
   // Number of shards expressed as power of two for native request ordering in
   // Navy.
   // This value needs to be non-zero.

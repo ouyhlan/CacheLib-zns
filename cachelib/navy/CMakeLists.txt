@@ -36,6 +36,22 @@ add_library (cachelib_navy
   common/Types.cpp
   driver/Driver.cpp
   Factory.cpp
+  zone_hash/storage/AdaptiveStorageManager.cpp
+  zone_hash/storage/LogStorageManager.cpp
+  zone_hash/storage/SetStorageManager.cpp
+  zone_hash/storage/ZNSDevice.cpp
+  zone_hash/storage/Zone.cpp
+  zone_hash/storage/ZoneBucketStorage.cpp
+  zone_hash/storage/ZoneManager.cpp
+  zone_hash/utils/ClockSegmentIndex.cpp
+  zone_hash/utils/CuckooHashMap.cpp
+  zone_hash/utils/LogSegment.cpp
+  zone_hash/utils/SegmentIndex.cpp
+  zone_hash/utils/ZoneBucket.cpp
+  zone_hash/AdaptiveLog.cpp
+  zone_hash/CuckooSet.cpp
+  zone_hash/SLog.cpp
+  zone_hash/ZoneHash.cpp
   scheduler/ThreadPoolJobScheduler.cpp
   scheduler/ThreadPoolJobQueue.cpp
   serialization/RecordIO.cpp
@@ -52,6 +68,7 @@ endif()
 
 target_link_libraries(cachelib_navy PUBLIC
   zbd
+  nvme
   cachelib_common
   )
 

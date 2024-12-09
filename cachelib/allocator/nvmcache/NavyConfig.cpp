@@ -16,6 +16,10 @@
 
 #include "cachelib/allocator/nvmcache/NavyConfig.h"
 
+#include <folly/Format.h>
+#include <folly/logging/xlog.h>
+
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -133,6 +137,35 @@ BigHashConfig& BigHashConfig::setSizePctAndMaxItemSize(
   }
   sizePct_ = sizePct;
   smallItemMaxSize_ = smallItemMaxSize;
+  return *this;
+}
+
+ZoneHashConfig& ZoneHashConfig::setLog(uint32_t log_num_zones,
+                                       uint64_t flash_partitions,
+                                       uint64_t index_per_flash_partitions,
+                                       uint32_t threshold) {
+  if (log_num_zones == 0) {
+    throw std::invalid_argument(
+        folly::sformat("to enable ZoneHashLog, ZoneHashLog zone num should be "
+                       "greater than 0, but {} is set",
+                       log_num_zones));
+  }
+  log_num_zones_ = log_num_zones;
+
+  if (index_per_flash_partitions == 0) {
+    throw std::invalid_argument(
+        folly::sformat("to enable ZoneHashLog, need >=1 index partitions per "
+                       "flash partition, {} is set",
+                       index_per_flash_partitions));
+  }
+  if (flash_partitions == 0) {
+    throw std::invalid_argument(folly::sformat(
+        "to enable ZoneHashLog, need >=1 flash partitions, {} is set",
+        flash_partitions));
+  }
+  log_flash_partitions_ = flash_partitions;
+  log_index_per_flash_partitions_ = index_per_flash_partitions;
+  set_admit_threshold_ = threshold;
   return *this;
 }
 

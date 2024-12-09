@@ -30,8 +30,8 @@ test -d cachelib || die "failed to change-dir to expected root directory"
 mkdir -p "build-$NAME" || die "failed to create build-$NAME directory"
 cd "build-$NAME" || die "'cd' failed"
 
-cmake ../cachelib/ || die "cmake failed"
+cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=YES ../cachelib/ || die "cmake failed"
 make -j --keep-going || die "make failed"
-#sudo make install || die "make install failed"
+make install || die "make install failed"
 
 #echo "$NAME library is now installed"

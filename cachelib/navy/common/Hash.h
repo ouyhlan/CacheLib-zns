@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <folly/Range.h>
 #include <cstdint>
 
 #include "cachelib/common/Hash.h"

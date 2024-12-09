@@ -1,0 +1,45 @@
+// @nolint uses workload where the objects all fit within the small object cache
+{
+    "cache_config" : {
+      "cacheSizeMB" : 1024,
+      "poolRebalanceIntervalSec" : 1,
+      "moveOnSlabRelease" : true,
+      
+      "navyReaderThreads": 32,
+      "navyWriterThreads": 32,
+      "nvmCacheSizeMB" : 65536,
+      "nvmCachePaths": ["/dev/nvme1n1"],
+      "deviceMaxWriteSize":262144,
+      "navyZonedDevice" : true,
+      "navyZoneNum": 64,
+      "navyZoneHashLogZoneNum": 7,
+
+      "navyZoneHashAdaptivePct": 40,
+
+      "navyBigHashSizePct": 0,
+      "navyZoneHash": true,
+      "navyZoneHashPageSize": 4096,
+      "navyZoneHashLogThreshold": 8,
+      "navyZoneHashCleanZoneNum": 2,
+      "navyZoneHashLogFlashPartition": 16,
+      "navyZoneHashLogIndexPerFlashPartition": 32,
+      "navySmallItemMaxSize": 2048
+    },
+    "test_config" : 
+      {
+  
+        "numOps" : 4000000000,
+        "numThreads" : 32,
+        "numKeys" : 10000000,
+  
+        "keySizeRange" : [8, 16],
+        "keySizeRangeProbability" : [1.0],
+  
+        "valSizeRange" : [200, 300],
+        "valSizeRangeProbability" : [1.0],
+  
+      "setRatio": 0.4,  
+      "getRatio": 0.6
+      }
+  
+  }

@@ -152,7 +152,8 @@ Cache<Allocator>::Cache(const CacheConfig& config,
           config_.navyReqOrderShardsPower);
     }
     nvmConfig.navyConfig.setBlockSize(config_.navyBlockSize);
-    nvmConfig.navyConfig.setZonedDevice(config_.navyZonedDevice);
+    nvmConfig.navyConfig.setZonedDevice(config_.navyZonedDevice,
+                                        config_.navyZoneNum);
 
     // configure BlockCache
     auto& bcConfig = nvmConfig.navyConfig.blockCache()
@@ -186,6 +187,18 @@ Cache<Allocator>::Cache(const CacheConfig& config,
                                     config_.navySmallItemMaxSize)
           .setBucketSize(config_.navyBigHashBucketSize)
           .setBucketBfSize(config_.navyBloomFilterPerBucketSize);
+    }
+
+    if (config_.navyZoneHash) {
+      nvmConfig.navyConfig.zoneHash()
+          .setMaxItemSize(config_.navySmallItemMaxSize)
+          .setPageSize(config_.navyZoneHashPageSize)
+          .setLog(config_.navyZoneHashLogZoneNum,
+                  config_.navyZoneHashLogFlashPartition,
+                  config_.navyZoneHashLogIndexPerFlashPartition,
+                  config_.navyZoneHashLogThreshold)
+          .setAdaptive(config_.navyZoneHashAdaptivePct)
+          .setGarbageCollection(config_.navyZoneHashCleanZoneNum);
     }
 
     nvmConfig.navyConfig.setMaxParcelMemoryMB(config_.navyParcelMemoryMB);
@@ -546,6 +559,14 @@ Stats Cache<Allocator>::getStats() const {
         lookup("navy_device_write_latency_us_p999999");
     ret.nvmWriteLatencyMicrosP100 = lookup("navy_device_write_latency_us_p100");
     ret.numNvmItemRemovedSetSize = lookup("items_tracked_for_destructor");
+
+    ret.numNvmZoneHashLogGetHitCount = lookup("navy_zh_log_hit_counts");
+    ret.numNvmZoneHashSetGetHitCount = lookup("navy_zh_set_hit_counts");
+    ret.numNvmZoneHashAdaptiveGetHitCount =
+        lookup("navy_zh_adaptive_hit_counts");
+    ret.numNvmZoneHashGetHitCount = ret.numNvmZoneHashLogGetHitCount +
+                                    ret.numNvmZoneHashSetGetHitCount +
+                                    ret.numNvmZoneHashAdaptiveGetHitCount;
 
     // track any non-zero check sum errors or io errors
     for (const auto& [k, v] : navyStats) {

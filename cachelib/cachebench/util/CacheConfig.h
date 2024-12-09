@@ -17,6 +17,7 @@
 #pragma once
 
 #include <any>
+#include <cstdint>
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/RebalanceStrategy.h"
@@ -112,6 +113,8 @@ struct CacheConfig : public JSONConfig {
   uint64_t navyBlockSize{512};
   bool navyZonedDevice{false};
 
+  uint32_t navyZoneNum{64};
+
   // Navy specific: region size in MB
   uint64_t navyRegionSizeMB{16};
 
@@ -139,6 +142,23 @@ struct CacheConfig : public JSONConfig {
   // bucket size for BigHash. This controls the write amplification for small
   // objects in Navy. Every small object write performs a RMW for a bucket.
   uint64_t navyBigHashBucketSize = 4096;
+
+  // Determines how much of the device is given to ZoneHash engine in Navy
+  bool navyZoneHash = false;
+
+  uint32_t navyZoneHashLogZoneNum = 7;
+
+  uint32_t navyZoneHashCleanZoneNum = 2;
+
+  uint32_t navyZoneHashAdaptivePct = 0;
+
+  uint64_t navyZoneHashPageSize = 4096;
+
+  uint64_t navyZoneHashLogThreshold = 2;
+
+  uint64_t navyZoneHashLogFlashPartition = 1;
+
+  uint64_t navyZoneHashLogIndexPerFlashPartition = 1;
 
   // Big Hash bloom filter size in bytes per bucket above.
   uint64_t navyBloomFilterPerBucketSize = 8;

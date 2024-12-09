@@ -17,19 +17,25 @@
 #include "cachelib/allocator/nvmcache/NavySetup.h"
 
 #include <folly/File.h>
+#include <folly/Format.h>
 #include <folly/logging/xlog.h>
+
+#include <cstdint>
+#include <stdexcept>
 
 #include "cachelib/allocator/nvmcache/NavyConfig.h"
 #include "cachelib/navy/Factory.h"
+#include "cachelib/navy/common/Device.h"
 #include "cachelib/navy/scheduler/JobScheduler.h"
+#include "cachelib/navy/zone_hash/storage/ZNSDevice.h"
 
 namespace facebook {
 namespace cachelib {
 
 namespace {
 
-struct ZNSArgs{
-  const navy::Device *dev_{0};
+struct ZNSArgs {
+  const navy::Device* dev_{0};
   bool usesZonedDevice_{0};
   uint32_t ioUsedZones_{0};
   uint64_t bcStartZone_{0};
@@ -100,6 +106,57 @@ uint64_t setupBigHash(const navy::BigHashConfig& bigHashConfig,
   return bigHashCacheOffset;
 }
 
+void setupZoneHash(const navy::ZoneHashConfig& zoneHashConfig,
+                   uint32_t io_align_size,
+                   cachelib::navy::CacheProto& proto,
+                   const navy::Device& device) {
+  const navy::ZNSDevice& zns_device =
+      dynamic_cast<const navy::ZNSDevice&>(device);
+  uint32_t nr_zones = zns_device.numZones();
+  uint64_t zone_size = zns_device.getIOZoneSize();
+
+  auto page_size = zoneHashConfig.getPageSize();
+  if (page_size != alignUp(page_size, io_align_size)) {
+    throw std::invalid_argument(
+        folly::sformat("Page size: {} is not aligned to io_align_size: {}",
+                       page_size, io_align_size));
+  }
+
+  uint32_t log_nr_zones = zoneHashConfig.getLogNumZones();
+  uint32_t adaptive_nr_zones =
+      (nr_zones - log_nr_zones) * zoneHashConfig.getAdaptivePct() / 100ul;
+  uint32_t set_nr_zones = nr_zones - log_nr_zones - adaptive_nr_zones;
+  uint32_t nonlog_max_nr_zones = nr_zones - log_nr_zones;
+  uint32_t num_clean_zones = zoneHashConfig.getNumCleanZones();
+
+  if (log_nr_zones > nr_zones || log_nr_zones <= num_clean_zones) {
+    throw std::invalid_argument(
+        folly::sformat("Log nr zones: {} is out of range ({}, {}]",
+                       log_nr_zones, num_clean_zones, nr_zones));
+  }
+
+  if (set_nr_zones > nr_zones || set_nr_zones <= num_clean_zones) {
+    throw std::invalid_argument(
+        folly::sformat("set nr zones: {} is out of range ({}, {}]",
+                       set_nr_zones, num_clean_zones, nr_zones));
+  }
+
+  auto zone_hash = cachelib::navy::createZoneHashProto();
+  zone_hash->setLayout(nonlog_max_nr_zones, set_nr_zones, num_clean_zones,
+                       zone_size);
+
+  uint64_t log_flash_partitions = zoneHashConfig.getLogFlashPartitions();
+  uint64_t log_index_partitions = zoneHashConfig.getLogIndexPartitions();
+  uint32_t set_admit_threshold = zoneHashConfig.getSetAdmitThreshold();
+  zone_hash->setLog(log_flash_partitions, log_index_partitions, log_nr_zones,
+                    num_clean_zones, zone_size, set_admit_threshold);
+
+  zone_hash->setAdaptive(nonlog_max_nr_zones, log_flash_partitions,
+                         log_index_partitions, adaptive_nr_zones, zone_size);
+
+  proto.setZoneHash(std::move(zone_hash), zoneHashConfig.getSmallItemMaxSize());
+}
+
 void setupBlockCache(const navy::BlockCacheConfig& blockCacheConfig,
                      uint64_t blockCacheSize,
                      uint32_t ioAlignSize,
@@ -107,7 +164,7 @@ void setupBlockCache(const navy::BlockCacheConfig& blockCacheConfig,
                      bool usesRaidFiles,
                      bool itemDestructorEnabled,
                      cachelib::navy::CacheProto& proto,
-                     ZNSArgs &usesZnsArg) {
+                     ZNSArgs& usesZnsArg) {
   auto regionSize = blockCacheConfig.getRegionSize();
   if (regionSize != alignUp(regionSize, ioAlignSize)) {
     throw std::invalid_argument(
@@ -129,28 +186,27 @@ void setupBlockCache(const navy::BlockCacheConfig& blockCacheConfig,
 
   if (usesZnsArg.usesZonedDevice_) {
     if (usesZnsArg.dev_->getIOZoneCapSize() != regionSize) {
-        throw std::invalid_argument(
-            folly::sformat("Region size: {} MB is not aligned to ZoneCapSize: {} MB",
-                   regionSize/(1024 * 1024),
-                   usesZnsArg.dev_->getIOZoneCapSize()/(1024 * 1024)));
+      throw std::invalid_argument(folly::sformat(
+          "Region size: {} MB is not aligned to ZoneCapSize: {} MB",
+          regionSize / (1024 * 1024),
+          usesZnsArg.dev_->getIOZoneCapSize() / (1024 * 1024)));
     }
     auto adjustedBlockCacheOffset = 0;
     auto cacheSizeAdjustment =
-            (usesZnsArg.dev_->getIONrOfZones() -
-            usesZnsArg.ioUsedZones_) * usesZnsArg.dev_->getIOZoneCapSize();
+        (usesZnsArg.dev_->getIONrOfZones() - usesZnsArg.ioUsedZones_) *
+        usesZnsArg.dev_->getIOZoneCapSize();
 
-    adjustedBlockCacheOffset = alignUp(adjustedBlockCacheOffset,
-      usesZnsArg.dev_->getIOZoneSize());
+    adjustedBlockCacheOffset =
+        alignUp(adjustedBlockCacheOffset, usesZnsArg.dev_->getIOZoneSize());
     usesZnsArg.bcStartZone_ = adjustedBlockCacheOffset;
     blockCacheSize = cacheSizeAdjustment;
     blockCacheOffset = adjustedBlockCacheOffset;
-    usesZnsArg.bcEndZone_ = adjustedBlockCacheOffset +
-      (usesZnsArg.dev_->getIONrOfZones() -
-                    usesZnsArg.ioUsedZones_) *
-                        usesZnsArg.dev_->getIOZoneSize();
+    usesZnsArg.bcEndZone_ =
+        adjustedBlockCacheOffset +
+        (usesZnsArg.dev_->getIONrOfZones() - usesZnsArg.ioUsedZones_) *
+            usesZnsArg.dev_->getIOZoneSize();
     usesZnsArg.ioUsedZones_ +=
-      (usesZnsArg.dev_->getIONrOfZones() -
-                    usesZnsArg.ioUsedZones_);
+        (usesZnsArg.dev_->getIONrOfZones() - usesZnsArg.ioUsedZones_);
   }
 
   auto blockCache = cachelib::navy::createBlockCacheProto();
@@ -200,7 +256,7 @@ void setupCacheProtos(const navy::NavyConfig& config,
   const uint64_t totalCacheSize = device.getSize();
 
   auto metadataSize = config.getDeviceMetadataSize();
-  ZNSArgs  useZnsArgs;
+  ZNSArgs useZnsArgs;
 
   if (metadataSize == 0 && !config.usesZonedDevice()) {
     metadataSize = getDefaultMetadataSize(totalCacheSize, ioAlignSize);
@@ -208,24 +264,23 @@ void setupCacheProtos(const navy::NavyConfig& config,
 
   if (config.usesZonedDevice()) {
     useZnsArgs.dev_ = &device;
-    useZnsArgs.usesZonedDevice_ =
-                config.usesZonedDevice();
+    useZnsArgs.usesZonedDevice_ = config.usesZonedDevice();
     useZnsArgs.ioUsedZones_ = 0;
     useZnsArgs.bcStartZone_ = 0;
     if (config.isBigHashEnabled())
-      throw std::invalid_argument{
-        folly::sformat("invalid  configuration: cannot enable big in ZNS")};
- }
+      throw std::invalid_argument{folly::sformat(
+          "invalid  configuration: cannot enable big hash in ZNS")};
+  }
 
   metadataSize = alignUp(metadataSize, ioAlignSize);
 
   if (config.usesZonedDevice()) {
-     useZnsArgs.bcStartZone_ =
-               useZnsArgs.ioUsedZones_ *
-                     useZnsArgs.dev_->getIOZoneCapSize();
-     useZnsArgs.ioUsedZones_ = metadataSize /useZnsArgs.dev_->getIOZoneCapSize();
-     if (metadataSize %useZnsArgs.dev_->getIOZoneCapSize())
-        useZnsArgs.ioUsedZones_++;
+    useZnsArgs.bcStartZone_ =
+        useZnsArgs.ioUsedZones_ * useZnsArgs.dev_->getIOZoneCapSize();
+    useZnsArgs.ioUsedZones_ =
+        metadataSize / useZnsArgs.dev_->getIOZoneCapSize();
+    if (metadataSize % useZnsArgs.dev_->getIOZoneCapSize())
+      useZnsArgs.ioUsedZones_++;
   }
 
   if (metadataSize >= totalCacheSize) {
@@ -248,11 +303,16 @@ void setupCacheProtos(const navy::NavyConfig& config,
     blockCacheSize = totalCacheSize - metadataSize;
   }
 
+  if (config.isZoneHashEnabled()) {
+    // ZoneHash doesnot use block cache
+    blockCacheSize = 0;
+    setupZoneHash(config.zoneHash(), ioAlignSize, proto, device);
+  }
+
   // Set up BlockCache if enabled
   if (blockCacheSize > 0) {
     setupBlockCache(config.blockCache(), blockCacheSize, ioAlignSize,
-                    metadataSize, config.usesRaidFiles(),
-                    itemDestructorEnabled,
+                    metadataSize, config.usesRaidFiles(), itemDestructorEnabled,
                     proto, useZnsArgs);
   }
 }
@@ -289,14 +349,15 @@ std::unique_ptr<cachelib::navy::Device> createDevice(
   auto blockSize = config.getBlockSize();
   auto maxDeviceWriteSize = config.getDeviceMaxWriteSize();
 
- if (config.usesZonedDevice()) {
-	return cachelib::navy::createZNSDevice(
+  if (config.usesZonedDevice()) {
+    return cachelib::navy::createZNSDevice(
         config.getFileName(),
         config.getFileSize(),
+        config.getZoneNum(),
         blockSize,
         std::move(encryptor),
         maxDeviceWriteSize > 0 ? alignDown(maxDeviceWriteSize, blockSize) : 0);
- }else if (config.usesRaidFiles()) {
+  } else if (config.usesRaidFiles()) {
     auto stripeSize = config.getRaidStripeSize();
     return cachelib::navy::createRAIDDevice(
         config.getRaidPaths(),

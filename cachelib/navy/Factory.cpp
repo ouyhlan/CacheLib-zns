@@ -19,6 +19,8 @@
 #include <folly/Format.h>
 #include <folly/Random.h>
 
+#include <cstdint>
+#include <memory>
 #include <stdexcept>
 
 #include "cachelib/navy/admission_policy/DynamicRandomAP.h"
@@ -27,8 +29,12 @@
 #include "cachelib/navy/block_cache/BlockCache.h"
 #include "cachelib/navy/block_cache/FifoPolicy.h"
 #include "cachelib/navy/block_cache/LruPolicy.h"
+#include "cachelib/navy/common/Device.h"
 #include "cachelib/navy/driver/Driver.h"
+#include "cachelib/navy/engine/Engine.h"
 #include "cachelib/navy/serialization/RecordIO.h"
+#include "cachelib/navy/zone_hash/ZoneHash.h"
+#include "cachelib/navy/zone_hash/utils/Types.h"
 
 /* O_DIRECT not available on Mac OS */
 #ifndef O_DIRECT
@@ -172,6 +178,96 @@ class BigHashProtoImpl final : public BigHashProto {
   uint32_t hashTableBitSize_{};
 };
 
+class ZoneHashProtoImpl final : public ZoneHashProto {
+ public:
+  ZoneHashProtoImpl() = default;
+  ~ZoneHashProtoImpl() override = default;
+
+  void setDevice(Device* device) { config_.device = device; }
+
+  // void setJobScheduler(JobScheduler* scheduler) {
+  //   config_.log_config.scheduler = scheduler;
+  //   config_.set_config.scheduler = scheduler;
+  //   config_.adaptive_config.scheduler = scheduler;
+  // }
+
+  void setAdaptive(uint32_t max_num_zones,
+                   uint64_t flash_partitions,
+                   uint64_t index_partitions_per_flash_partitions,
+                   uint32_t initial_num_zones,
+                   uint64_t zone_size_byte) override {
+    uint64_t num_sets = config_.set_config.numPages() / kDefaultSlotPerBucket;
+
+    if (config_.adaptive_config.zone_nand_type == ZoneNandType::QLC) {
+      config_.adaptive_config.zone_capacity_byte = zone_size_byte;
+    } else if (config_.adaptive_config.zone_nand_type == ZoneNandType::SLC) {
+      config_.adaptive_config.zone_capacity_byte = zone_size_byte / 4;
+    }
+
+    config_.adaptive_config.index_partitions =
+        flash_partitions * index_partitions_per_flash_partitions;
+    config_.adaptive_config.num_index_buckets =
+        num_sets - num_sets % config_.adaptive_config.index_partitions;
+
+    config_.adaptive_config.flash_partitions = flash_partitions;
+    config_.adaptive_config.initial_num_zones = initial_num_zones;
+    config_.adaptive_config.max_num_zones = max_num_zones;
+  }
+
+  void setLayout(uint32_t max_num_zones,
+                 uint32_t initial_num_zones,
+                 uint32_t num_clean_zones,
+                 uint64_t zone_size_byte) override {
+    // metadata
+    if (config_.set_config.zone_nand_type == ZoneNandType::QLC) {
+      config_.set_config.max_size_byte = max_num_zones * zone_size_byte;
+    } else if (config_.set_config.zone_nand_type == ZoneNandType::SLC) {
+      config_.set_config.max_size_byte = max_num_zones * zone_size_byte / 4;
+    }
+
+    // Device related
+    config_.set_config.initial_num_zones = initial_num_zones;
+    config_.set_config.num_clean_zones = num_clean_zones;
+  }
+
+  void setLog(uint64_t flash_partitions,
+              uint64_t index_partitions_per_flash_partitions,
+              uint32_t num_zones,
+              uint32_t num_clean_zones,
+              uint64_t zone_size_byte,
+              uint32_t threshold) override {
+    uint64_t num_sets = config_.set_config.numPages() / kDefaultSlotPerBucket;
+
+    // metadata
+    if (config_.log_config.zone_nand_type == ZoneNandType::QLC) {
+      config_.log_config.log_size_byte = num_zones * zone_size_byte;
+    } else if (config_.log_config.zone_nand_type == ZoneNandType::SLC) {
+      config_.log_config.log_size_byte = num_zones * zone_size_byte / 4;
+    }
+
+    // index related settings
+    config_.log_config.log_index_partitions =
+        flash_partitions * index_partitions_per_flash_partitions;
+    config_.log_config.num_index_buckets =
+        num_sets - num_sets % config_.log_config.log_index_partitions;
+
+    // flash related settings
+    config_.log_config.log_flash_partitions = flash_partitions;
+    config_.log_config.num_zones = num_zones;
+    config_.log_config.num_clean_zones = num_clean_zones;
+
+    // cache eviction policy related settings
+    config_.log_config.set_admit_threshold = threshold;
+  }
+
+  std::unique_ptr<Engine> create() && {
+    return std::make_unique<ZoneHash>(std::move(config_));
+  }
+
+ private:
+  ZoneHash::Config config_;
+};
+
 class CacheProtoImpl final : public CacheProto {
  public:
   CacheProtoImpl() = default;
@@ -198,6 +294,12 @@ class CacheProtoImpl final : public CacheProto {
   void setBigHash(std::unique_ptr<BigHashProto> proto,
                   uint32_t smallItemMaxSize) override {
     bigHashProto_ = std::move(proto);
+    config_.smallItemMaxSize = smallItemMaxSize;
+  }
+
+  void setZoneHash(std::unique_ptr<ZoneHashProto> proto,
+                   uint32_t smallItemMaxSize) override {
+    zoneHashProto_ = std::move(proto);
     config_.smallItemMaxSize = smallItemMaxSize;
   }
 
@@ -267,6 +369,15 @@ class CacheProtoImpl final : public CacheProto {
       }
     }
 
+    if (zoneHashProto_) {
+      auto zhProto = dynamic_cast<ZoneHashProtoImpl*>(zoneHashProto_.get());
+      if (zhProto != nullptr) {
+        zhProto->setDevice(config_.device.get());
+        // zhProto->setJobScheduler(config_.scheduler.get());
+        config_.smallItemCache = std::move(*zhProto).create();
+      }
+    }
+
     return std::make_unique<Driver>(std::move(config_));
   }
 
@@ -274,6 +385,7 @@ class CacheProtoImpl final : public CacheProto {
   DestructorCallback destructorCb_;
   std::unique_ptr<BlockCacheProto> blockCacheProto_;
   std::unique_ptr<BigHashProto> bigHashProto_;
+  std::unique_ptr<ZoneHashProto> zoneHashProto_;
   Driver::Config config_;
 };
 // Open cache file @fileName and set it size to @size.
@@ -334,6 +446,10 @@ std::unique_ptr<BlockCacheProto> createBlockCacheProto() {
 
 std::unique_ptr<BigHashProto> createBigHashProto() {
   return std::make_unique<BigHashProtoImpl>();
+}
+
+std::unique_ptr<ZoneHashProto> createZoneHashProto() {
+  return std::make_unique<ZoneHashProtoImpl>();
 }
 
 std::unique_ptr<CacheProto> createCacheProto() {
@@ -401,11 +517,13 @@ std::unique_ptr<Device> createFileDevice(
 std::unique_ptr<Device> createZNSDevice(
     std::string fileName,
     uint64_t singleFileSize,
+    uint32_t nr_zones,
     uint32_t blockSize,
     std::shared_ptr<navy::DeviceEncryptor> encryptor,
     uint32_t maxDeviceWriteSize) {
-  return createDirectIoZNSDevice(std::move(fileName),singleFileSize, blockSize,
-                                  std::move(encryptor), maxDeviceWriteSize);
+  return createDirectIoZNSDevice(std::move(fileName), singleFileSize, nr_zones,
+                                 blockSize, std::move(encryptor),
+                                 maxDeviceWriteSize);
 }
 
 } // namespace navy

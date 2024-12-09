@@ -17,6 +17,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -104,6 +105,29 @@ class BigHashProto {
                               uint32_t hashTableBitSize) = 0;
 };
 
+class ZoneHashProto {
+ public:
+  virtual ~ZoneHashProto() = default;
+
+  virtual void setAdaptive(uint32_t max_num_zones,
+                           uint64_t flash_partitions,
+                           uint64_t index_partitions_per_flash_partitions,
+                           uint32_t initial_num_zones,
+                           uint64_t zone_size_byte) = 0;
+
+  virtual void setLayout(uint32_t max_num_zones,
+                         uint32_t initial_num_zones,
+                         uint32_t num_clean_zones,
+                         uint64_t zone_size_byte) = 0;
+
+  virtual void setLog(uint64_t flash_partitions,
+                      uint64_t index_partitions_per_flash_partitions,
+                      uint32_t num_zones,
+                      uint32_t num_clean_zones,
+                      uint64_t zone_size_byte,
+                      uint32_t threshold) = 0;
+};
+
 // Cache object prototype. Setup cache desired parameters and pass proto to
 // @createCache function.
 class CacheProto {
@@ -129,6 +153,10 @@ class CacheProto {
   // Set up big hash engine.
   virtual void setBigHash(std::unique_ptr<BigHashProto> proto,
                           uint32_t smallItemMaxSize) = 0;
+
+  // Set up zone hash engine
+  virtual void setZoneHash(std::unique_ptr<ZoneHashProto> proto,
+                           uint32_t smallItemMaxSize) = 0;
 
   // Set JobScheduler for async function calls.
   virtual void setJobScheduler(std::unique_ptr<JobScheduler> ex) = 0;
@@ -165,6 +193,8 @@ std::unique_ptr<BlockCacheProto> createBlockCacheProto();
 
 // Creates BigHash engine prototype.
 std::unique_ptr<BigHashProto> createBigHashProto();
+
+std::unique_ptr<ZoneHashProto> createZoneHashProto();
 
 // Creates Cache object prototype.
 std::unique_ptr<CacheProto> createCacheProto();
@@ -218,6 +248,7 @@ std::unique_ptr<Device> createFileDevice(
 std::unique_ptr<Device> createZNSDevice(
     std::string fileName,
     uint64_t singleFileSize,
+    uint32_t nr_zones,
     uint32_t blockSize,
     std::shared_ptr<DeviceEncryptor> encryptor,
     uint32_t maxDeviceWriteSize);
