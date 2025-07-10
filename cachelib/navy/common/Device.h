@@ -19,6 +19,8 @@
 #include <folly/File.h>
 #include <folly/io/IOBuf.h>
 
+#include <cstdint>
+
 #include "cachelib/common/AtomicCounter.h"
 #include "cachelib/common/PercentileStats.h"
 #include "cachelib/navy/common/Buffer.h"
@@ -78,16 +80,16 @@ class Device {
          std::shared_ptr<DeviceEncryptor> encryptor,
          uint32_t ioAlignSize,
          uint32_t maxWriteSize,
-         uint32_t ioNoOfZones=0,
-         uint64_t ioZoneSize=0,
-         uint64_t ioZoneCapSize=0)
-      : size_(size),
+         uint32_t ioNoOfZones = 0,
+         uint64_t ioZoneSize = 0,
+         uint64_t ioZoneCapSize = 0)
+      : maxWriteSize_(maxWriteSize),
+        size_(size),
         ioAlignmentSize_{ioAlignSize},
-        maxWriteSize_(maxWriteSize),
-        encryptor_{std::move(encryptor)},
         ioZoneSize_{std::move(ioZoneSize)},
         ioZoneCapSize_{std::move(ioZoneCapSize)},
-        ioNoOfZones_{std::move(ioNoOfZones)}{
+        ioNoOfZones_{std::move(ioNoOfZones)},
+        encryptor_{std::move(encryptor)} {
     if (ioAlignSize == 0) {
       throw std::invalid_argument(
           folly::sformat("Invalid ioAlignSize {}", ioAlignSize, size));
@@ -140,6 +142,8 @@ class Device {
   void flush() { flushImpl(); }
 
   // Return bytes written since device start
+  uint64_t getQLCBytesWritten() const { return numQLCBytesWritten_.get(); }
+  uint64_t getSLCBytesWritten() const { return numSLCBytesWritten_.get(); }
   uint64_t getBytesWritten() const { return bytesWritten_.get(); }
 
   // Return bytes read since device start
@@ -154,7 +158,9 @@ class Device {
   // Returns the alignment size for device io operations
   uint32_t getIOAlignmentSize() const { return ioAlignmentSize_; }
   bool reset(uint64_t offset, uint32_t size) { return resetImpl(offset, size); }
-  bool finish(uint64_t offset, uint32_t size) { return finishImpl(offset, size); }
+  bool finish(uint64_t offset, uint32_t size) {
+    return finishImpl(offset, size);
+  }
   uint64_t getIOZoneSize() const { return ioZoneSize_; }
   uint64_t getIOZoneCapSize() const { return ioZoneCapSize_; }
   uint64_t getIONrOfZones() const { return ioNoOfZones_; }
@@ -166,16 +172,25 @@ class Device {
   virtual bool readImpl(uint64_t offset, uint32_t size, void* value) = 0;
   virtual void flushImpl() = 0;
 
- private:
+  mutable AtomicCounter numSLCBytesWritten_;
+  mutable AtomicCounter numQLCBytesWritten_;
   mutable AtomicCounter bytesWritten_;
   mutable AtomicCounter bytesRead_;
+  mutable util::PercentileStats writeLatencyEstimator_;
+  mutable util::PercentileStats readLatencyEstimator_;
+
+  // When write-io is issued, it is broken down into writeImpl calls at
+  // this granularity. maxWriteSize_ 0 means no maximum write size.
+  // maxWriteSize_ option allows splitting the large writes to smaller
+  // writes so that the device read latency is not adversely impacted by
+  // large device writes
+  const uint32_t maxWriteSize_{0};
+
+ private:
   mutable AtomicCounter writeIOErrors_;
   mutable AtomicCounter readIOErrors_;
   mutable AtomicCounter encryptionErrors_;
   mutable AtomicCounter decryptionErrors_;
-
-  mutable util::PercentileStats readLatencyEstimator_;
-  mutable util::PercentileStats writeLatencyEstimator_;
 
   bool readInternal(uint64_t offset, uint32_t size, void* value);
 
@@ -194,13 +209,6 @@ class Device {
 
   // Number of zones
   const uint64_t ioNoOfZones_{0};
-
-  // When write-io is issued, it is broken down into writeImpl calls at
-  // this granularity. maxWriteSize_ 0 means no maximum write size.
-  // maxWriteSize_ option allows splitting the large writes to smaller
-  // writes so that the device read latency is not adversely impacted by
-  // large device writes
-  const uint32_t maxWriteSize_{0};
 
   std::shared_ptr<DeviceEncryptor> encryptor_;
 
@@ -231,9 +239,11 @@ std::unique_ptr<Device> createMemoryDevice(
 std::unique_ptr<Device> createDirectIoZNSDevice(
     std::string fileName,
     uint64_t size,
+    uint32_t nr_zones,
     uint32_t ioAlignSize,
     std::shared_ptr<DeviceEncryptor> encryptor,
-    uint32_t maxDeviceWriteSize);
+    uint32_t maxDeviceWriteSize,
+    std::string char_device_path);
 
 } // namespace navy
 } // namespace cachelib

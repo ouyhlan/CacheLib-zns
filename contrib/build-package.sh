@@ -111,6 +111,22 @@ update_submodules=
 cmake_custom_params=
 
 case "$1" in
+  concurrentqueue)
+    NAME=concurrentqueue
+    REPO=https://github.com/cameron314/concurrentqueue.git
+    REPODIR=cachelib/external/$NAME
+    SRCDIR=$REPODIR
+    external_git_clone=yes
+    ;;
+
+  coro)
+    NAME=libcoro
+    REPO=https://github.com/jbaldwin/libcoro.git
+    REPODIR=cachelib/external/$NAME
+    SRCDIR=$REPODIR
+    update_submodules=yes
+    external_git_clone=yes
+    ;;
 
 libzbd2)
     NAME=libzbd
@@ -202,7 +218,6 @@ libzbd2)
   folly)
     NAME=folly
     SRCDIR=cachelib/external/$NAME
-    update_submodules=yes
     cmake_custom_params="-DBUILD_SHARED_LIBS=ON"
     if test "$build_tests" = "yes" ; then
         cmake_custom_params="$cmake_custom_params -DBUILD_TESTS=ON"

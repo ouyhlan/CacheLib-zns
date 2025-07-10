@@ -16,7 +16,10 @@
 
 #pragma once
 #include <folly/Benchmark.h>
+#include <folly/Format.h>
 #include <gflags/gflags.h>
+
+#include <cstdint>
 
 #include "cachelib/common/PercentileStats.h"
 
@@ -51,14 +54,24 @@ struct Stats {
   uint64_t numNvmDestructorCalls{0};
   uint64_t numNvmEvictions{0};
   uint64_t numNvmBytesWritten{0};
+  uint64_t numNvmSLCBytesWritten{0};
+  uint64_t numNvmQLCBytesWritten{0};
   uint64_t numNvmNandBytesWritten{0};
   uint64_t numNvmLogicalBytesWritten{0};
+
+  uint64_t numNvmZoneHashLogGetHitCount{0};
+  uint64_t numNvmZoneHashSetGetHitCount{0};
+  uint64_t numNvmZoneHashAdaptiveGetHitCount{0};
+    uint64_t numNvmZoneHashGetHitCount{0};
 
   uint64_t numNvmItemRemovedSetSize{0};
 
   util::PercentileStats::Estimates cacheAllocateLatencyNs;
   util::PercentileStats::Estimates cacheFindLatencyNs;
 
+  double nvmReadLatencyMicrosP5{0};
+  double nvmReadLatencyMicrosP10{0};
+  double nvmReadLatencyMicrosP25{0};
   double nvmReadLatencyMicrosP50{0};
   double nvmReadLatencyMicrosP90{0};
   double nvmReadLatencyMicrosP99{0};
@@ -167,6 +180,9 @@ struct Stats {
         out << folly::sformat("{:20} {:8} : {:>10.2f} us\n", cat, pct, val);
       };
 
+      fmtLatency(readCat, "p5", nvmReadLatencyMicrosP5);
+      fmtLatency(readCat, "p10", nvmReadLatencyMicrosP10);
+      fmtLatency(readCat, "p25", nvmReadLatencyMicrosP25);
       fmtLatency(readCat, "p50", nvmReadLatencyMicrosP50);
       fmtLatency(readCat, "p90", nvmReadLatencyMicrosP90);
       fmtLatency(readCat, "p99", nvmReadLatencyMicrosP99);
@@ -191,6 +207,10 @@ struct Stats {
 
       double devWriteAmp =
           pctFn(numNvmNandBytesWritten, numNvmBytesWritten) / 100.0;
+      out << folly::sformat("NVM bytes written (QLC)       : {:6.2f} GB\n", 
+                            numNvmQLCBytesWritten / GB);
+      out << folly::sformat("NVM bytes written (SLC)       : {:6.2f} GB\n", 
+                            numNvmSLCBytesWritten / GB);
       out << folly::sformat("NVM bytes written (physical)  : {:6.2f} GB\n",
                             numNvmBytesWritten / GB);
       out << folly::sformat("NVM bytes written (logical)   : {:6.2f} GB\n",
@@ -253,6 +273,21 @@ struct Stats {
           << std::endl;
     }
 
+    if (numNvmZoneHashGetHitCount > 0) {
+      const double nvmLogHitRatio =
+          pctFn(numNvmZoneHashLogGetHitCount, numNvmZoneHashGetHitCount);
+      const double nvmSetHitRatio =
+          pctFn(numNvmZoneHashSetGetHitCount, numNvmZoneHashGetHitCount);
+      const double nvmAdaptiveHitRatio =
+          pctFn(numNvmZoneHashAdaptiveGetHitCount, numNvmZoneHashGetHitCount);
+      out << folly::sformat(
+                 "NVM Hit Distribution: Log: {:6.2f}%, Adaptive: {:6.2f}%, "
+                 "Set: "
+                 "{:6.2f}%",
+                 nvmLogHitRatio, nvmAdaptiveHitRatio, nvmSetHitRatio)
+          << std::endl;
+    }
+
     if (slabsReleased > 0) {
       out << folly::sformat(
                  "Released {:,} slabs\n"
@@ -285,6 +320,18 @@ struct Stats {
     return numNvmGets > 0 ? numNvmGetMiss : numCacheGetMiss;
   }
 
+  double getOverallHitRatio(const Stats& prevStats) const {
+    auto totalMisses = getTotalMisses();
+    auto prevTotalMisses = prevStats.getTotalMisses();
+    if (numCacheGets <= prevStats.numCacheGets ||
+        totalMisses <= prevTotalMisses) {
+      return 0.0;
+    }
+
+    return invertPctFn(totalMisses - prevTotalMisses,
+                       numCacheGets - prevStats.numCacheGets);
+  }
+
   // Render the stats based on the delta between overall stats and previous
   // stats. It can be used to render the stats in the last time period.
   void render(const Stats& prevStats, std::ostream& out) const {
@@ -311,6 +358,29 @@ struct Stats {
           "RAM Hit Ratio : {:6.2f}%\n"
           "NVM Hit Ratio : {:6.2f}%\n",
           ramHitRatio, nvmHitRatio);
+
+      const uint64_t prevNumNvmZoneHasGetHit =
+          prevStats.numNvmZoneHashGetHitCount;
+      if (numNvmZoneHashGetHitCount > 0) {
+        const double nvmLogHitRatio =
+            pctFn(numNvmZoneHashLogGetHitCount -
+                      prevStats.numNvmZoneHashLogGetHitCount,
+                  numNvmZoneHashGetHitCount - prevNumNvmZoneHasGetHit);
+        const double nvmSetHitRatio =
+            pctFn(numNvmZoneHashSetGetHitCount -
+                      prevStats.numNvmZoneHashSetGetHitCount,
+                  numNvmZoneHashGetHitCount - prevNumNvmZoneHasGetHit);
+        const double nvmAdaptiveHitRatio =
+            pctFn(numNvmZoneHashAdaptiveGetHitCount -
+                      prevStats.numNvmZoneHashAdaptiveGetHitCount,
+                  numNvmZoneHashGetHitCount - prevNumNvmZoneHasGetHit);
+        out << folly::sformat(
+                   "NVM Hit Distribution: Log: {:6.2f}%, Adaptive: {:6.2f}%, "
+                   "Set: "
+                   "{:6.2f}%",
+                   nvmLogHitRatio, nvmAdaptiveHitRatio, nvmSetHitRatio)
+            << std::endl;
+      }
     }
   }
 

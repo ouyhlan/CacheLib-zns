@@ -152,7 +152,8 @@ Cache<Allocator>::Cache(const CacheConfig& config,
           config_.navyReqOrderShardsPower);
     }
     nvmConfig.navyConfig.setBlockSize(config_.navyBlockSize);
-    nvmConfig.navyConfig.setZonedDevice(config_.navyZonedDevice);
+    nvmConfig.navyConfig.setZonedDevice(config_.navyZonedDevice,
+                                        config_.navyZoneNum);
 
     // configure BlockCache
     auto& bcConfig = nvmConfig.navyConfig.blockCache()
@@ -186,6 +187,20 @@ Cache<Allocator>::Cache(const CacheConfig& config,
                                     config_.navySmallItemMaxSize)
           .setBucketSize(config_.navyBigHashBucketSize)
           .setBucketBfSize(config_.navyBloomFilterPerBucketSize);
+    }
+
+    if (config_.navyZoneHash) {
+      nvmConfig.navyConfig.zoneHash()
+          .setCharDevicePath(config_.charDevicePath)
+          .setMaxItemSize(config_.navySmallItemMaxSize)
+          .setPageSize(config_.navyZoneHashPageSize)
+          .setLog(config_.navyZoneHashLogZoneNum,
+                  config_.navyZoneHashLogFlashPartition,
+                  config_.navyZoneHashLogIndexPerFlashPartition,
+                  config_.navyZoneHashLogThreshold)
+          .setAdaptive(config_.navyZoneHashAdaptivePct)
+          .setGarbageCollection(config_.navyZoneHashLogCleanZoneNum,
+                                config_.navyZoneHashSetCleanZoneNum);
     }
 
     nvmConfig.navyConfig.setMaxParcelMemoryMB(config_.navyParcelMemoryMB);
@@ -515,6 +530,8 @@ Stats Cache<Allocator>::getStats() const {
                  : 0;
     };
     ret.numNvmItems = lookup("navy_bh_items") + lookup("navy_bc_items");
+    ret.numNvmQLCBytesWritten = lookup("navy_device_qlc_bytes_written");
+    ret.numNvmSLCBytesWritten = lookup("navy_device_slc_bytes_written");
     ret.numNvmBytesWritten = lookup("navy_device_bytes_written");
     uint64_t now = fetchNandWrites();
     if (now > nandBytesBegin_) {
@@ -524,6 +541,10 @@ Stats Cache<Allocator>::getStats() const {
     double bcLogicalBytes = lookup("navy_bc_logical_written");
     ret.numNvmLogicalBytesWritten =
         static_cast<size_t>(bhLogicalBytes + bcLogicalBytes);
+
+    ret.nvmReadLatencyMicrosP5 = lookup("navy_device_read_latency_us_p5");
+    ret.nvmReadLatencyMicrosP10 = lookup("navy_device_read_latency_us_p10");
+    ret.nvmReadLatencyMicrosP25 = lookup("navy_device_read_latency_us_p25");
     ret.nvmReadLatencyMicrosP50 = lookup("navy_device_read_latency_us_p50");
     ret.nvmReadLatencyMicrosP90 = lookup("navy_device_read_latency_us_p90");
     ret.nvmReadLatencyMicrosP99 = lookup("navy_device_read_latency_us_p99");
@@ -546,6 +567,14 @@ Stats Cache<Allocator>::getStats() const {
         lookup("navy_device_write_latency_us_p999999");
     ret.nvmWriteLatencyMicrosP100 = lookup("navy_device_write_latency_us_p100");
     ret.numNvmItemRemovedSetSize = lookup("items_tracked_for_destructor");
+
+    ret.numNvmZoneHashLogGetHitCount = lookup("navy_zh_log_hit_counts");
+    ret.numNvmZoneHashSetGetHitCount = lookup("navy_zh_set_hit_counts");
+    ret.numNvmZoneHashAdaptiveGetHitCount =
+        lookup("navy_zh_adaptive_hit_counts");
+        ret.numNvmZoneHashGetHitCount = ret.numNvmZoneHashLogGetHitCount +
+                                    ret.numNvmZoneHashSetGetHitCount +
+                                    ret.numNvmZoneHashAdaptiveGetHitCount;
 
     // track any non-zero check sum errors or io errors
     for (const auto& [k, v] : navyStats) {

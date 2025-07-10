@@ -1,0 +1,57 @@
+// @nolint uses workload where the objects all fit within the small object cache
+{
+    "cache_config" : {
+      "cacheSizeMB" : 256,
+      "poolRebalanceIntervalSec" : 2,
+      "rebalanceStrategy": "hits",
+      "rebalanceMinRatio": 0.1,
+      "rebalanceMinSlabs": 2,
+      "moveOnSlabRelease" : true,
+      
+      "navyReaderThreads": 16,
+      "navyWriterThreads": 16,
+      "nvmCacheSizeMB" : 102400,
+      "nvmCachePaths": ["/dev/nvme1n1"],
+      "charDevicePath": "/dev/ng1n1",
+      "navyParcelMemoryMB": 6048,
+      "enableChainedItem": true,
+      "deviceMaxWriteSize":262144,
+      "navyZonedDevice" : true,
+      "navyZoneNum": 400,
+      "navyZoneHashLogZoneNum": 20,
+
+      "navyZoneHashAdaptivePct": 50,
+
+      "navyBigHashSizePct": 0,
+      "navyZoneHash": true,
+      "navyZoneHashPageSize": 4096,
+      "navyZoneHashLogThreshold": 8,
+      "navyZoneHashLogCleanZoneNum": 1,
+      "navyZoneHashSetCleanZoneNum": 2,
+      "navyZoneHashLogFlashPartition": 16,
+      "navyZoneHashLogIndexPerFlashPartition": 256,
+      "navySmallItemMaxSize": 2048
+    },
+    "test_config" : {
+      "opRatePerSec": 137500,
+      "opRateBurstSize": 200,
+      "enableLookaside": true,
+      "generator": "online", 
+
+      "keySizeRange" : [8, 16],
+      "keySizeRangeProbability" : [1.0],
+      
+      "onlySetIfMiss" : false,
+      "numKeys": 1607051777777,
+      "numOps": 100000000000, 
+      "numThreads": 5, 
+      "popDistFile": "pop.json",
+      "valSizeDistFile": "sizes.json",
+      
+      "addChainedRatio": 0.0,
+      "setRatio": 0.0,
+      "delRatio": 0.0,
+      "getRatio": 0.9845283120275657,
+      "loneGetRatio": 0.13471687972434254
+      }
+  }

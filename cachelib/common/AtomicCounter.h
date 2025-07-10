@@ -49,6 +49,10 @@ class AtomicCounter {
     return val_.fetch_add(n, std::memory_order_relaxed) + n;
   }
 
+  uint64_t fetch_add(uint64_t n) {
+    return val_.fetch_add(n, std::memory_order_relaxed);
+  }
+
   void add(uint64_t n) { val_.fetch_add(n, std::memory_order_relaxed); }
 
   uint64_t sub_fetch(uint64_t n) {

@@ -251,12 +251,12 @@ Status Driver::lookupAsync(HashedKey hk, LookupCallback cb) {
           }
         }
 
-        if (cb) {
-          cb(status, hk, std::move(value));
-        }
+          if (cb) {
+            cb(status, hk, std::move(value));
+          }
 
-        updateLookupStats(status);
-        return JobExitCode::Done;
+          updateLookupStats(status);
+                return JobExitCode::Done;
       },
       "lookup",
       JobType::Read,

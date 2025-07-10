@@ -19,6 +19,7 @@
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
 #include "cachelib/allocator/LruTailAgeStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
+#include "cachelib/cachebench/util/JSONConfig.h"
 
 namespace facebook {
 namespace cachelib {
@@ -56,6 +57,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
 
   JSONSetVal(configJson, nvmCacheSizeMB);
   JSONSetVal(configJson, nvmCachePaths);
+  JSONSetVal(configJson, charDevicePath);
   JSONSetVal(configJson, writeAmpDeviceList);
 
   JSONSetVal(configJson, navyBlockSize);
@@ -65,6 +67,17 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, navyReqOrderShardsPower);
   JSONSetVal(configJson, navyBigHashSizePct);
   JSONSetVal(configJson, navyBigHashBucketSize);
+
+  JSONSetVal(configJson, navyZoneHash);
+  JSONSetVal(configJson, navyZoneHashLogZoneNum);
+  JSONSetVal(configJson, navyZoneHashLogCleanZoneNum);
+  JSONSetVal(configJson, navyZoneHashSetCleanZoneNum);
+  JSONSetVal(configJson, navyZoneHashAdaptivePct);
+  JSONSetVal(configJson, navyZoneHashPageSize);
+  JSONSetVal(configJson, navyZoneHashLogThreshold);
+  JSONSetVal(configJson, navyZoneHashLogFlashPartition);
+  JSONSetVal(configJson, navyZoneHashLogIndexPerFlashPartition);
+
   JSONSetVal(configJson, navyBloomFilterPerBucketSize);
   JSONSetVal(configJson, navySmallItemMaxSize);
   JSONSetVal(configJson, navyParcelMemoryMB);
@@ -81,6 +94,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, navyEncryption);
   JSONSetVal(configJson, deviceMaxWriteSize);
   JSONSetVal(configJson, navyZonedDevice);
+  JSONSetVal(configJson, navyZoneNum);
 
   JSONSetVal(configJson, memoryOnlyTTL);
 
@@ -94,7 +108,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 656>();
+  checkCorrectSize<CacheConfig, 744>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(

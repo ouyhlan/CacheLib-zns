@@ -22,7 +22,6 @@
 
 #include <cassert>
 
-#include "cachelib/common/Utils.h"
 
 namespace facebook {
 namespace cachelib {

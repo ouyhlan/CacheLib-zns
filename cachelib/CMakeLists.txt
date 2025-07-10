@@ -82,7 +82,7 @@ set(CMAKE_MODULE_PATH
   ${CMAKE_MODULE_PATH})
 
 # specify the C++ standard
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # include(fb_cxx_flags)
@@ -276,6 +276,14 @@ function(add_thrift_file PREFIX THRIFT_RELATIVE_PATH CPP_OPTION)
 endfunction()
 
 
+add_subdirectory(external/libcoro)
+set(LIBCORO_BUILD_TESTS OFF)
+set(LIBCORO_BUILD_EXAMPLES OFF)
+set(LIBCORO_BUILIBCORO_FEATURE_NETWORKINGLD_EXAMPLES OFF)
+set(LIBCORO_FEATURE_TLS OFF)
+set(LIBCORO_BUILD_SHARED_LIBS ON)
+
+add_subdirectory(external/concurrentqueue)
 add_subdirectory (common)
 add_subdirectory (shm)
 add_subdirectory (navy)

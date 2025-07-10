@@ -13,6 +13,13 @@ build-glog/
 build-googletest/
 build-sparsemap/
 build-wangle/
+build-libzbd/
+build-zstd/
+build-concurrentqueue/
+build-libcoro/
+build/
+opt/
+.vscode/
 
 # Required source-code dependencies, fetched by ./contrib/ scripts.
 cachelib/external/fmt/
